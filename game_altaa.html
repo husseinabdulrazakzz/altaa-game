@@ -65,6 +65,13 @@ button:focus-visible{outline:3px solid var(--h);outline-offset:2px}
 .mlabel{font-weight:800;opacity:.8}.ans.fix{grid-template-columns:repeat(3,minmax(0,1fr));max-width:520px;margin:10px auto 0}.ans.fix button{min-height:80px}
 .slogan{margin-top:12px;font-size:clamp(20px,2.6vw,28px);font-weight:800;background:var(--ink);color:var(--bg);border-radius:18px;padding:12px}
 @media(max-width:720px){.mstage{grid-template-columns:minmax(0,1fr)}}
+.qtype{font-weight:800;font-size:18px;background:var(--soft);border-radius:999px;padding:4px 16px}
+.qtype.gem{background:#F4C430;color:#1F3A5F}
+.ans button.a-w{background:var(--ink);color:var(--bg);font-size:clamp(34px,4.6vw,50px)}
+.ans button.a-ok{background:var(--ok)}.ans button.a-no{background:var(--bad)}
+.ans button.right{outline:5px solid var(--ok);outline-offset:3px}
+.sent{font-family:"Noto Naskh Arabic",serif;font-weight:700;font-size:clamp(34px,4.6vw,52px);line-height:1.5;text-align:center}
+.listen{font-size:64px;line-height:1}
 @media(prefers-reduced-motion:reduce){.conf{display:none}.micbtn.live{animation:none}}
 @media(max-width:720px){.stage{grid-template-columns:minmax(0,1fr)}.teams{grid-template-columns:repeat(3,minmax(0,1fr))}.ans{grid-template-columns:repeat(3,minmax(0,1fr))}.ans button small{display:none}}
 </style>
@@ -88,17 +95,14 @@ button:focus-visible{outline:3px solid var(--h);outline-offset:2px}
       <div class="card">
         <div class="timer" id="tm"><i></i><em id="tmn">15</em></div>
         <div class="count" id="cnt"></div>
+        <div class="qtype" id="qtype"></div>
         <img class="p" id="pic" alt="">
         <div class="word" id="word"></div>
         <div class="say">
           <button class="btn" id="sayJoin">💡 مُساعَدَةٌ: اسْمَعْها مَوْصولَةً</button>
         </div>
       </div>
-      <div class="ans">
-        <button class="a-t" data-a="ت">ت <small>مَفْتوحَةٌ</small></button>
-        <button class="a-ta" data-a="ة">ة <small>مَرْبوطَةٌ</small></button>
-        <button class="a-h" data-a="ه">ه <small>هاءٌ</small></button>
-      </div>
+      <div class="ans" id="ans"></div>
     </div>
     <div class="msg" id="msg"></div>
     <div class="bar"><button class="btn" id="next">التّالي ⬅️</button><button class="btn" id="restart">↺ مِنْ جَديدٍ</button></div>
@@ -178,25 +182,67 @@ function confetti(){ const c=$('conf'); c.innerHTML = Array.from({length:60},()=
 function drawTeams(){ $('teams').innerHTML = TEAMS.map((t,k)=>`<div class="team ${k===turn&&!done?'turn':''}"><b>${t[0]} ${t[1]}</b><span>${score[k]}</span></div>`).join(''); }
 function shuffle(a){ for(let k=a.length-1;k>0;k--){ const j=Math.random()*(k+1)|0; [a[k],a[j]]=[a[j],a[k]]; } return a; }
 
-function startTimer(){ clearInterval(tick); left = 15; paint(); tick = setInterval(()=>{ left--; paint(); if(left<=0){ clearInterval(tick); answer(null); } },1000); }
-function paint(){ $('tmn').textContent = left; $('tm').style.setProperty('--p', (left/15*100)+'%'); }
-
-function load(){
-  const q = deck[i];
-  $('pic').src = IMG[q[0]]; $('pic').alt = q[3];
-  $('word').innerHTML = `${q[1]}<span class="end">؟</span>`;
-  $('cnt').textContent = (i+1)+' / '+deck.length;
-  $('msg').textContent = 'دَوْرُ مَجْموعَةِ ' + TEAMS[turn][1] + ' ' + TEAMS[turn][0];
-  document.querySelectorAll('#v-game .ans button').forEach(b=>b.disabled=false);
-  $('next').disabled = true; drawTeams(); startTimer();
+const SENT = [
+ {t:'ذَهَبَتِ البِنْتُ إلى المَدْرَسَةِ.', o:['ذَهَبَتِ','البِنْتُ','المَدْرَسَةِ'], a:2},
+ {t:'أَكَلَتْ أُخْتي تُفّاحَةً.', o:['أَكَلَتْ','أُخْتي','تُفّاحَةً'], a:2},
+ {t:'قَرَأَ أَحْمَدُ كِتابَهُ في الحَديقَةِ.', o:['كِتابَهُ','أَحْمَدُ','الحَديقَةِ'], a:2},
+ {t:'في بَيْتِنا نَخْلَةٌ عالِيَةٌ.', o:['بَيْتِنا','نَخْلَةٌ','في'], a:1},
+ {t:'رَسَمَتْ مَرْيَمُ وَرْدَةً.', o:['رَسَمَتْ','مَرْيَمُ','وَرْدَةً'], a:2}];
+const TYPES = {
+  end:{label:'✏️ أَكْمِلِ الحَرْفَ الأَخيرَ', sec:15},
+  listen:{label:'🎧 اسْمَعْ وَاخْتَرْ', sec:15},
+  spell:{label:'🔤 اخْتَرِ الكِتابَةَ الصَّحيحَةَ', sec:15},
+  tf:{label:'🤔 صَوابٌ أَمْ خَطَأٌ؟', sec:15},
+  sent:{label:'🔍 جِدِ الكَلِمَةَ الَّتي تَنْتَهي بِتاءٍ مَرْبوطَةٍ', sec:20}};
+const LET = ['ت','ة','ه'], LCLS = {'ت':'a-t','ة':'a-ta','ه':'a-h'}, LNAME = {'ت':'مَفْتوحَةٌ','ة':'مَرْبوطَةٌ','ه':'هاءٌ'};
+const plain = q => q[1].replace('ـ','');
+let QT = 15;
+function startTimer(sec){ clearInterval(tick); QT = left = sec; paint(); tick = setInterval(()=>{ left--; paint(); if(left<=0){ clearInterval(tick); answer(null); } },1000); }
+function paint(){ $('tmn').textContent = left; $('tm').style.setProperty('--p', (left/QT*100)+'%'); }
+function buttons(list){ $('ans').innerHTML = list.map((b,k)=>`<button class="${b.cls}" data-k="${k}">${b.html}</button>`).join(''); $('ans').querySelectorAll('button').forEach(el=>el.addEventListener('click',()=>answer(+el.dataset.k))); }
+function letterButtons(){ return LET.map(l=>({cls:LCLS[l], html:`${l} <small>${LNAME[l]}</small>`, v:l})); }
+function build(){
+  const rows = shuffle(BANK.slice()), sents = shuffle(SENT.slice());
+  const order = ['end','listen','spell','tf','sent','end','listen','spell','tf','sent'];
+  const gem = 5 + (Math.random()*5|0); let r = 0, sn = 0;
+  return order.map((t,k)=>{
+    const item = {type:t, gem:k===gem};
+    if(t==='sent'){ item.s = sents[sn++]; item.opts = item.s.o.map((w,j)=>({cls:'a-w', html:w, v:j})); item.ans = item.s.a; }
+    else { item.q = rows[r++ % rows.length];
+      if(t==='spell'){ item.opts = shuffle(LET.map(l=>({cls:'a-w', html:plain(item.q)+l, v:l}))); item.ans = item.q[2]; }
+      else if(t==='tf'){ const wrongL = LET.filter(l=>l!==item.q[2])[Math.random()*2|0]; item.shown = Math.random()<.5 ? item.q[2] : wrongL; item.opts = [{cls:'a-ok',html:'✔ صَوابٌ',v:true},{cls:'a-no',html:'✘ خَطَأٌ',v:false}]; item.ans = item.shown===item.q[2]; }
+      else { item.opts = letterButtons(); item.ans = item.q[2]; } }
+    return item; });
 }
-function answer(a){
-  const q = deck[i]; clearInterval(tick);
-  document.querySelectorAll('#v-game .ans button').forEach(b=>b.disabled=true);
-  $('word').innerHTML = q[1].replace('ـ','') + `<span style="color:${COL[q[2]]}">${q[2]}</span>`;
-  if(a===q[2]){ score[turn]++; tone([523,659,784]); confetti(); $('msg').innerHTML = '<span style="color:var(--ok)">أَحْسَنْتُمْ! +1 ⭐</span>'; }
-  else { tone([220,180],.2); $('msg').innerHTML = `<span style="color:var(--bad)">${a?'حاوِلوا مَرَّةً أُخْرى في الجَوْلَةِ القادِمَةِ':'انْتَهى الوَقْتُ'}</span> — قِفْ: ${q[3]} ← صِلْ: ${q[4]}`; }
-  play(BANK.indexOf(q),1,q[4]); $('next').disabled = false; drawTeams();
+function load(){
+  const it = deck[i], q = it.q;
+  $('qtype').textContent = (it.gem ? '💎 سُؤالُ الكَنْزِ ×2 • ' : '') + TYPES[it.type].label; $('qtype').classList.toggle('gem', it.gem);
+  $('cnt').textContent = (i+1)+' / '+deck.length;
+  $('pic').hidden = it.type==='sent';
+  if(q){ $('pic').src = IMG[q[0]]; $('pic').alt = ''; }
+  $('sayJoin').hidden = !(it.type==='end');
+  if(it.type==='end') $('word').innerHTML = `${q[1]}<span class="end">؟</span>`;
+  else if(it.type==='listen'){ $('word').innerHTML = `<button class="btn listen" id="rep" aria-label="أعد الاستماع">🔊</button>`; $('rep').addEventListener('click',()=>play(BANK.indexOf(q),1,q[4])); play(BANK.indexOf(q),1,q[4]); }
+  else if(it.type==='spell') $('word').innerHTML = '؟';
+  else if(it.type==='tf') $('word').innerHTML = plain(q) + it.shown;
+  else $('word').innerHTML = `<div class="sent">${it.s.t}</div>`;
+  buttons(it.opts.map(o=>({cls:o.cls, html:o.html})));
+  $('msg').textContent = 'دَوْرُ مَجْموعَةِ ' + TEAMS[turn][1] + ' ' + TEAMS[turn][0];
+  $('next').disabled = true; drawTeams(); startTimer(TYPES[it.type].sec);
+}
+function answer(k){
+  const it = deck[i], q = it.q; clearInterval(tick);
+  const btns = [...$('ans').querySelectorAll('button')]; btns.forEach(b=>b.disabled=true);
+  const ok = k!==null && it.opts[k].v === it.ans;
+  const rightIdx = it.opts.findIndex(o=>o.v===it.ans); if(btns[rightIdx]) btns[rightIdx].classList.add('right');
+  if(q) $('word').innerHTML = plain(q) + `<span style="color:${COL[q[2]]}">${q[2]}</span>`;
+  else $('word').innerHTML = `<div class="sent">${it.s.t.replace(it.s.o[it.s.a], `<span style="color:var(--ta);text-decoration:underline">${it.s.o[it.s.a]}</span>`)}</div>`;
+  $('pic').hidden = !q;
+  const pts = it.gem ? 2 : 1;
+  if(ok){ score[turn]+=pts; tone([523,659,784]); confetti(); $('msg').innerHTML = `<span style="color:var(--ok)">أَحْسَنْتُمْ! +${pts} ⭐</span>`; }
+  else { tone([220,180],.2); $('msg').innerHTML = `<span style="color:var(--bad)">${k===null?'انْتَهى الوَقْتُ':'حاوِلوا في الجَوْلَةِ القادِمَةِ'}</span>` + (q ? ` — قِفْ: ${q[3]} ← صِلْ: ${q[4]}` : ''); }
+  if(q) play(BANK.indexOf(q),1,q[4]);
+  $('next').disabled = false; drawTeams();
 }
 function next(){ i++; turn = (turn+1)%TEAMS.length; if(i>=deck.length) return finish(); load(); }
 function finish(){
@@ -205,11 +251,10 @@ function finish(){
   $('win').hidden = false; $('win').innerHTML = `<img src="${IMG.trophy}" alt="" width="140"><h2>الفائِزُ: ${win}</h2><p>كُلُّكُمْ أَبْطالُ عائِلَةِ التّاءِ 👏</p><button class="btn" id="again">↺ جَوْلَةٌ جَديدَةٌ</button>`;
   $('again').addEventListener('click', start); tone([523,659,784,1046]); confetti();
 }
-function start(){ deck = shuffle(BANK.slice()).slice(0,10); i = 0; turn = 0; score = [0,0,0,0,0]; done = false; $('win').hidden = true; $('play').hidden = false; load(); }
-document.querySelectorAll('#v-game .ans button').forEach(b=>b.addEventListener('click',()=>answer(b.dataset.a)));
+function start(){ deck = build(); i = 0; turn = 0; score = [0,0,0,0,0]; done = false; $('win').hidden = true; $('play').hidden = false; load(); }
 $('next').addEventListener('click', next);
 $('restart').addEventListener('click', start);
-$('sayJoin').addEventListener('click',()=>play(BANK.indexOf(deck[i]),1,deck[i][4]));
+$('sayJoin').addEventListener('click',()=>{ const q = deck[i].q; if(q) play(BANK.indexOf(q),1,q[4]); });
 start();
 
 /* magic mic: "correct the AI" (backup activity) */
